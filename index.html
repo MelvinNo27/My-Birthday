@@ -36,11 +36,7 @@
       const others     = document.getElementById("others").checked;
       const othersText = document.getElementById("othersText").value.trim();
 
-      if (!name) { showStatus("⚠️ Please enter your full name.", "error"); return; }
-      if (!/^[A-Za-z\s]+$/.test(name)) { showStatus("⚠️ Name must contain letters only — no numbers or symbols.", "error"); return; }
-      const letterCount = name.replace(/\s/g,"").length;
-      if (letterCount < 4) { showStatus("⚠️ Name must be at least 4 letters.", "error"); return; }
-      if (letterCount > 8) { showStatus("⚠️ Name must be 8 letters or less.", "error"); return; }
+      if (!name) { showStatus("⚠️ Please enter your name.", "error"); return; }
       if (others && !othersText) { showStatus("⚠️ Please specify what else you're bringing.", "error"); return; }
 
       // ── Duplicate name check ──
@@ -73,7 +69,6 @@
         document.getElementById("others").checked = false;
         document.getElementById("othersText").value = "";
         document.getElementById("othersText").style.display = "none";
-        document.getElementById("charCount").className = "char-counter";
         setGF(false);
         launchConfetti();
         openBdayPopup(name);
@@ -156,6 +151,12 @@
     /* ── Birthday Popup ── */
     window.openBdayPopup = function(name) {
       document.getElementById("bdayPopupName").textContent = name + "!";
+      const specialMsg = document.getElementById("bdaySpecialMsg");
+      if (name.trim().toLowerCase() === "sherine") {
+        specialMsg.style.display = "block";
+      } else {
+        specialMsg.style.display = "none";
+      }
       document.getElementById("bdayPopup").classList.add("open");
       document.body.style.overflow = "hidden";
     };
@@ -241,10 +242,7 @@
     .btn-plus1.active { background:rgba(212,160,23,.3); border-color:var(--gold); color:var(--gold); }
     .btn-plus1:hover  { background:rgba(255,255,255,.22); }
 
-    .char-counter { font-size:10px; color:rgba(255,255,255,.4); text-align:right; margin-top:3px; display:block; text-transform:none; letter-spacing:0; }
-    .char-counter.warn { color:#ffcc00; }
-    .char-counter.tooShort { color:#ff8080; }
-    .name-hint   { font-size:10px; color:rgba(255,255,255,.4); margin-top:4px; display:block; text-transform:none; letter-spacing:.3px; }
+    .name-hint { font-size:10px; color:rgba(255,255,255,.4); margin-top:4px; display:block; text-transform:none; letter-spacing:.3px; }
 
     input[type="text"], select {
       width:100%; padding:12px 16px;
@@ -378,6 +376,7 @@
     }
     .bday-name { color:var(--gold); font-weight:700; }
     .bday-sub { font-size:12px; color:rgba(255,255,255,.5); margin-bottom:28px; letter-spacing:.5px; }
+    .bday-special { font-size:20px; color:var(--gold); font-weight:600; margin-bottom:20px; margin-top:-10px; font-style:italic; letter-spacing:.3px; }
     .bday-details {
       display:flex; justify-content:center; gap:16px;
       background:rgba(255,255,255,.08); border-radius:16px;
@@ -464,19 +463,17 @@
       <div class="form-title">Count Me In!</div>
 
       <div class="field">
-        <label>Your Full Name</label>
+        <label>Your Name</label>
         <div class="name-row">
           <div>
             <input
               type="text" id="fullName"
               placeholder="e.g. Juan"
-              maxlength="12"
-              oninput="onNameInput(this)"
             />
           </div>
           <button class="btn-plus1" id="plusOneBtn" onclick="toggleGF()">+1<br>GF</button>
         </div>
-        <span class="name-hint">Letters only · Min 4, Max 8 letters · Tap +1 if bringing GF</span>
+        <span class="name-hint">Tap +1 if bringing GF</span>
       </div>
 
       <div class="field">
@@ -550,6 +547,9 @@
       </div>
       <p class="bday-greeting">You're on the list, <span class="bday-name" id="bdayPopupName"></span></p>
       <p class="bday-sub">We can't wait to celebrate with you</p>
+      <p class="bday-special" id="bdaySpecialMsg" style="display:none;">Imo kung gipa Overthink :)
+        na kulbaan nako HAHAHA :)
+      </p>
       <div class="bday-details">
         <div class="bday-detail-item">
           <span class="bday-detail-icon">📅</span>
@@ -611,36 +611,6 @@
     const btn = document.getElementById("plusOneBtn");
     btn.classList.toggle("active", v);
     btn.innerHTML = v ? "✓<br>+1 GF" : "+1<br>GF";
-  }
-
-  /* Name input — strip emojis/stickers, letters only, max 8 */
-  function stripEmojisAndSymbols(str) {
-    return str.replace(/[^A-Za-z\s]/g, "");
-  }
-
-  function onNameInput(input) {
-    input.value = stripEmojisAndSymbols(input.value);
-
-    let letters = 0, result = "";
-    for (const ch of input.value) {
-      if (/\s/.test(ch)) { result += ch; }
-      else if (letters < 8) { result += ch; letters++; }
-    }
-    input.value = result;
-
-    letters = input.value.replace(/\s/g,"").length;
-    const counter = document.getElementById("charCount");
-    counter.textContent = `${letters} / 8 letters`;
-
-    if (letters === 0) {
-      counter.className = "char-counter";
-    } else if (letters < 4) {
-      counter.className = "char-counter tooShort";
-    } else if (letters >= 7) {
-      counter.className = "char-counter warn";
-    } else {
-      counter.className = "char-counter";
-    }
   }
 
   /* Others toggle */
