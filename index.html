@@ -1,0 +1,675 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Melvin's Birthday 🎉</title>
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;900&family=Poppins:wght@300;400;500;600&display=swap" rel="stylesheet"/>
+
+  <!-- Firebase SDK -->
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+    import { getDatabase, ref, push, onValue, get } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
+
+    const firebaseConfig = {
+      apiKey: "AIzaSyDSmqVA6WrN8WY5irLTlahPJAQJbH80ZK8",
+      authDomain: "billcal-84bb0.firebaseapp.com",
+      databaseURL: "https://billcal-84bb0-default-rtdb.firebaseio.com",
+      projectId: "billcal-84bb0",
+      storageBucket: "billcal-84bb0.firebasestorage.app",
+      messagingSenderId: "401794185626",
+      appId: "1:401794185626:web:6d9ed0e218af5a4d266223",
+      measurementId: "G-C7KP7NPEVG"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const db  = getDatabase(app);
+
+    window.addEventListener("DOMContentLoaded", () => { loadRSVPs(); });
+
+    /* ── Submit ── */
+    window.submitRSVP = async function () {
+      const name       = document.getElementById("fullName").value.trim();
+      const hasGF      = window._hasGF || false;
+      const duyan      = document.getElementById("duyan").checked;
+      const tent       = document.getElementById("tent").checked;
+      const others     = document.getElementById("others").checked;
+      const othersText = document.getElementById("othersText").value.trim();
+
+      if (!name) { showStatus("⚠️ Please enter your full name.", "error"); return; }
+      if (!/^[A-Za-z\s]+$/.test(name)) { showStatus("⚠️ Name must contain letters only — no numbers or symbols.", "error"); return; }
+      const letterCount = name.replace(/\s/g,"").length;
+      if (letterCount < 4) { showStatus("⚠️ Name must be at least 4 letters.", "error"); return; }
+      if (letterCount > 8) { showStatus("⚠️ Name must be 8 letters or less.", "error"); return; }
+      if (others && !othersText) { showStatus("⚠️ Please specify what else you're bringing.", "error"); return; }
+
+      // ── Duplicate name check ──
+      showStatus("⏳ Checking name...", "");
+      try {
+        const snapshot = await get(ref(db, "melvins_birthday_rsvps"));
+        if (snapshot.exists()) {
+          const entries = Object.values(snapshot.val());
+          const duplicate = entries.find(e => e.name && e.name.toLowerCase() === name.toLowerCase());
+          if (duplicate) {
+            showStatus(`⚠️ "${name}" is already on the list! You've already RSVP'd. 🎉`, "error");
+            return;
+          }
+        }
+      } catch (err) {
+        showStatus("❌ Could not verify name: " + err.message, "error");
+        return;
+      }
+
+      const rsvpRef = ref(db, "melvins_birthday_rsvps");
+      push(rsvpRef, {
+        name, hasGF,
+        bringing: { duyan, tent, others: others ? othersText : false },
+        timestamp: new Date().toISOString()
+      }).then(() => {
+        showStatus("", "");
+        document.getElementById("fullName").value = "";
+        document.getElementById("duyan").checked = false;
+        document.getElementById("tent").checked = false;
+        document.getElementById("others").checked = false;
+        document.getElementById("othersText").value = "";
+        document.getElementById("othersText").style.display = "none";
+        document.getElementById("charCount").textContent = "0 / 8 letters";
+        document.getElementById("charCount").className = "char-counter";
+        setGF(false);
+        launchConfetti();
+        openBdayPopup(name);
+      }).catch(err => { showStatus("❌ Error: " + err.message, "error"); });
+    };
+
+    function showStatus(msg, cls) {
+      const el = document.getElementById("status");
+      el.textContent = msg; el.className = "status " + cls;
+    }
+
+    /* ── Load RSVPs ── */
+    function loadRSVPs() {
+      const rsvpRef = ref(db, "melvins_birthday_rsvps");
+      onValue(rsvpRef, (snapshot) => {
+        const data    = snapshot.val();
+        const list    = document.getElementById("rsvpList");
+        const counter = document.getElementById("rsvpCount");
+        list.innerHTML = "";
+
+        if (!data) {
+          list.innerHTML = "<li class='empty'>No RSVPs yet — be the first! 🙋</li>";
+          counter.textContent = "0";
+          document.getElementById("rsvpTotal").textContent = "0";
+          return;
+        }
+
+        const entries = Object.entries(data).map(([id, v]) => ({ id, ...v }));
+        const totalPeople = entries.reduce((sum, e) => sum + 1 + (e.hasGF ? 1 : 0), 0);
+        counter.textContent = entries.length;
+        document.getElementById("rsvpTotal").textContent = totalPeople;
+        entries.reverse().forEach(entry => {
+          const li = document.createElement("li");
+          li.className = "rsvp-row";
+          li.setAttribute("tabindex","0");
+          li.setAttribute("role","button");
+
+          const extras = [];
+          if (entry.bringing?.duyan)  extras.push("Duyan");
+          if (entry.bringing?.tent)   extras.push("Tent");
+          if (entry.bringing?.others) extras.push(`${entry.bringing.others}`);
+
+          li.innerHTML = `
+            <div class="rsvp-avatar">${entry.name.charAt(0).toUpperCase()}</div>
+            <div class="rsvp-info">
+              <span class="rsvp-name">${entry.name}${entry.hasGF ? ' <span class="gf-tag">+1 💑</span>' : ""}</span>
+              <span class="rsvp-sub">${extras.length ? extras.join(" · ") : "No extras"}</span>
+            </div>
+            <div class="rsvp-arrow">›</div>`;
+
+          li.addEventListener("click",  () => openModal(entry));
+          li.addEventListener("keydown", e => { if (e.key === "Enter") openModal(entry); });
+          list.appendChild(li);
+        });
+      });
+    }
+
+    /* ── Detail Modal ── */
+    window.openModal = function(entry) {
+      const extras = [];
+      if (entry.bringing?.duyan)  extras.push("Duyan");
+      if (entry.bringing?.tent)   extras.push("Tent");
+      if (entry.bringing?.others) extras.push(`${entry.bringing.others}`);
+
+      document.getElementById("modalInitial").textContent = entry.name.charAt(0).toUpperCase();
+      document.getElementById("modalName").textContent    = entry.name + (entry.hasGF ? " " : "");
+      document.getElementById("modalGF").textContent      = entry.hasGF ? "Yes, +1 (GF) " : "Coming solo ";
+      document.getElementById("modalBring").textContent   = extras.length ? extras.join(", ") : "Nothing extra";
+      document.getElementById("modalTime").textContent    = entry.timestamp
+        ? new Date(entry.timestamp).toLocaleString("en-PH", { dateStyle:"medium", timeStyle:"short" }) : "—";
+
+      document.getElementById("modal").classList.add("open");
+      document.body.style.overflow = "hidden";
+    };
+    window.closeModal = function() {
+      document.getElementById("modal").classList.remove("open");
+      document.body.style.overflow = "";
+    };
+
+    /* ── Birthday Popup ── */
+    window.openBdayPopup = function(name) {
+      document.getElementById("bdayPopupName").textContent = name + "!";
+      document.getElementById("bdayPopup").classList.add("open");
+      document.body.style.overflow = "hidden";
+    };
+    window.closeBdayPopup = function() {
+      document.getElementById("bdayPopup").classList.remove("open");
+      document.body.style.overflow = "";
+    };
+  </script>
+
+  <style>
+    :root {
+      --ocean: #1a6b6e; --coral: #e8603c;
+      --gold:  #d4a017; --night: #0d1b2a; --text: #1c1c1e;
+    }
+    * { margin:0; padding:0; box-sizing:border-box; }
+    body { font-family:'Poppins',sans-serif; background:var(--night); color:var(--text); min-height:100vh; overflow-x:hidden; }
+    body::before {
+      content:''; position:fixed; inset:0;
+      background:
+        radial-gradient(ellipse at 20% 50%, rgba(26,107,110,.3) 0%, transparent 60%),
+        radial-gradient(ellipse at 80% 20%, rgba(212,160,23,.15) 0%, transparent 50%),
+        linear-gradient(180deg,#0d1b2a 0%,#1a2a3a 100%);
+      z-index:0;
+    }
+    .stars { position:fixed; inset:0; z-index:0; pointer-events:none; }
+    .star  { position:absolute; background:white; border-radius:50%; animation:twinkle 3s infinite alternate; }
+    @keyframes twinkle { 0%{opacity:.2;transform:scale(1)} 100%{opacity:1;transform:scale(1.3)} }
+    .wrapper { position:relative; z-index:1; max-width:680px; margin:0 auto; padding:24px 16px 60px; }
+
+    /* Card */
+    .card {
+      background:linear-gradient(160deg,#fffdf7 0%,#fef3dc 100%);
+      border-radius:28px; overflow:hidden;
+      box-shadow:0 0 0 1px rgba(212,160,23,.3), 0 30px 80px rgba(0,0,0,.5);
+    }
+
+    /* Header */
+    .header { background:linear-gradient(135deg,#1a6b6e 0%,#0d4a4c 100%); padding:40px 32px 36px; text-align:center; position:relative; overflow:hidden; }
+    .header::before { content:''; position:absolute; bottom:-2px; left:0; right:0; height:40px; background:linear-gradient(160deg,#fffdf7 0%,#fef3dc 100%); clip-path:ellipse(60% 100% at 50% 100%); }
+    .wave-deco { position:absolute; top:0; left:0; right:0; height:6px; background:repeating-linear-gradient(90deg,var(--gold) 0,var(--gold) 20px,var(--coral) 20px,var(--coral) 40px); }
+    .birthday-badge { display:inline-block; background:var(--gold); color:white; font-size:11px; font-weight:600; letter-spacing:3px; text-transform:uppercase; padding:6px 18px; border-radius:100px; margin-bottom:16px; }
+    .header h1 { font-family:'Playfair Display',serif; font-size:clamp(42px,10vw,68px); font-weight:900; color:white; line-height:1; text-shadow:0 4px 20px rgba(0,0,0,.4); }
+    .header h1 span { color:var(--gold); display:block; font-size:.55em; letter-spacing:2px; }
+    .emojis { font-size:32px; margin-top:12px; filter:drop-shadow(0 2px 6px rgba(0,0,0,.3)); animation:float 3s ease-in-out infinite; }
+    @keyframes float { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-8px)} }
+
+    /* Info */
+    .info-grid { display:grid; grid-template-columns:1fr 1fr 1fr; gap:12px; padding:28px 24px 0; }
+    .info-card { background:white; border-radius:16px; padding:16px; border:1.5px solid rgba(212,160,23,.2); box-shadow:0 2px 12px rgba(0,0,0,.06); }
+    .info-card.full { grid-column:1/-1; }
+    .info-icon  { font-size:24px; margin-bottom:6px; }
+    .info-label { font-size:10px; font-weight:600; letter-spacing:2px; text-transform:uppercase; color:var(--ocean); margin-bottom:4px; }
+    .info-value { font-size:14px; font-weight:500; color:var(--text); line-height:1.4; }
+    .info-value strong { color:var(--coral); }
+
+    /* Bring */
+    .bring-section { margin:20px 24px 0; background:white; border-radius:16px; padding:20px; border:1.5px solid rgba(212,160,23,.2); }
+    .bring-title { font-family:'Playfair Display',serif; font-size:18px; font-weight:700; color:var(--ocean); margin-bottom:14px; }
+    .bring-item { display:flex; align-items:flex-start; gap:10px; padding:10px 0; border-bottom:1px dashed rgba(0,0,0,.08); }
+    .bring-item:last-child { border-bottom:none; }
+    .bring-item .dot { width:8px; height:8px; background:var(--gold); border-radius:50%; margin-top:6px; flex-shrink:0; }
+    .bring-item p { font-size:14px; color:#444; line-height:1.5; }
+    .bring-item p strong { color:var(--coral); }
+
+    /* Form */
+    .form-section { margin:20px 24px 24px; background:linear-gradient(135deg,#1a6b6e 0%,#0d4a4c 100%); border-radius:20px; padding:24px; box-shadow:0 8px 32px rgba(26,107,110,.3); }
+    .form-title { font-family:'Playfair Display',serif; font-size:20px; color:white; margin-bottom:18px; text-align:center; }
+    .field { margin-bottom:14px; }
+    label { display:block; font-size:11px; font-weight:600; letter-spacing:1.5px; text-transform:uppercase; color:rgba(255,255,255,.7); margin-bottom:6px; }
+
+    /* Name row */
+    .name-row { display:flex; gap:8px; }
+    .name-row > div { flex:1; }
+    .btn-plus1 {
+      flex-shrink:0; padding:10px 12px;
+      background:rgba(255,255,255,.12);
+      border:1.5px solid rgba(255,255,255,.25);
+      border-radius:12px; cursor:pointer;
+      font-family:'Poppins',sans-serif; font-size:11px; font-weight:600;
+      color:rgba(255,255,255,.7); transition:all .2s;
+      white-space:nowrap; line-height:1.4; text-align:center;
+    }
+    .btn-plus1.active { background:rgba(212,160,23,.3); border-color:var(--gold); color:var(--gold); }
+    .btn-plus1:hover  { background:rgba(255,255,255,.22); }
+
+    .char-counter { font-size:10px; color:rgba(255,255,255,.4); text-align:right; margin-top:3px; display:block; text-transform:none; letter-spacing:0; }
+    .char-counter.warn { color:#ffcc00; }
+    .char-counter.tooShort { color:#ff8080; }
+    .name-hint   { font-size:10px; color:rgba(255,255,255,.4); margin-top:4px; display:block; text-transform:none; letter-spacing:.3px; }
+
+    input[type="text"], select {
+      width:100%; padding:12px 16px;
+      background:rgba(255,255,255,.12);
+      border:1.5px solid rgba(255,255,255,.2);
+      border-radius:12px; font-family:'Poppins',sans-serif;
+      font-size:14px; color:white; outline:none;
+      transition:border .2s, background .2s;
+    }
+    input::placeholder { color:rgba(255,255,255,.4); }
+    input:focus, select:focus { border-color:var(--gold); background:rgba(255,255,255,.18); }
+    select option { background:#0d4a4c; color:white; }
+
+    /* Checkboxes */
+    .checkbox-group { display:flex; gap:10px; flex-wrap:wrap; }
+    .check-label {
+      display:flex; align-items:center; gap:8px;
+      background:rgba(255,255,255,.12); border:1.5px solid rgba(255,255,255,.2);
+      border-radius:12px; padding:10px 14px; cursor:pointer;
+      transition:all .2s; font-size:13px; color:white;
+      letter-spacing:0; text-transform:none; font-weight:400; flex:1 1 auto;
+    }
+    .check-label:hover { background:rgba(255,255,255,.2); }
+    .check-label:has(input:checked) { background:rgba(212,160,23,.25); border-color:var(--gold); color:var(--gold); }
+    input[type="checkbox"] { accent-color:var(--gold); width:17px; height:17px; cursor:pointer; }
+
+    #othersText { display:none; margin-top:10px; width:100%; }
+
+    .btn-submit {
+      width:100%; padding:15px;
+      background:linear-gradient(135deg,var(--gold),var(--coral));
+      border:none; border-radius:14px;
+      font-family:'Poppins',sans-serif; font-size:15px; font-weight:700;
+      color:white; cursor:pointer; margin-top:18px; letter-spacing:1px;
+      text-transform:uppercase; box-shadow:0 6px 20px rgba(232,96,60,.4);
+      transition:transform .15s, box-shadow .15s;
+    }
+    .btn-submit:hover  { transform:translateY(-2px); box-shadow:0 10px 28px rgba(232,96,60,.5); }
+    .btn-submit:active { transform:translateY(0); }
+
+    .status { margin-top:12px; padding:12px 16px; border-radius:12px; font-size:13px; font-weight:500; text-align:center; min-height:0; transition:all .2s; }
+    .status:empty { padding:0; }
+    .status.success { background:rgba(255,255,255,.15); color:#a8ffb0; }
+    .status.error   { background:rgba(255,80,80,.15);   color:#ffaaaa; }
+
+    /* RSVP List */
+    .rsvp-section { margin:0 24px 32px; }
+    .rsvp-header  { display:flex; align-items:center; justify-content:space-between; margin-bottom:14px; }
+    .rsvp-header h3 { font-family:'Playfair Display',serif; font-size:18px; color:var(--ocean); }
+    .rsvp-badges { display:flex; gap:6px; align-items:center; }
+    .rsvp-badge { background:var(--coral); color:white; font-size:12px; font-weight:700; padding:4px 12px; border-radius:100px; }
+    .total-badge { background:var(--ocean); }
+    #rsvpList { list-style:none; display:flex; flex-direction:column; gap:8px; }
+
+    .rsvp-row {
+      background:white; border-radius:14px; padding:12px 14px;
+      display:flex; align-items:center; gap:12px; cursor:pointer;
+      border:1.5px solid rgba(212,160,23,.15);
+      transition:border-color .2s, box-shadow .2s, transform .15s;
+      animation:slideIn .3s ease;
+    }
+    .rsvp-row:hover { border-color:var(--gold); box-shadow:0 4px 18px rgba(212,160,23,.18); transform:translateY(-1px); }
+    .rsvp-row:focus { outline:2px solid var(--gold); outline-offset:2px; }
+    @keyframes slideIn { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }
+
+    .rsvp-avatar { width:40px; height:40px; border-radius:50%; background:linear-gradient(135deg,var(--ocean),#0d4a4c); color:white; font-weight:700; font-size:16px; display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+    .rsvp-info   { flex:1; min-width:0; }
+    .rsvp-name   { display:block; font-weight:600; font-size:14px; color:var(--ocean); }
+    .gf-tag      { display:inline-block; font-size:11px; font-weight:600; background:rgba(232,96,60,.1); color:var(--coral); padding:1px 7px; border-radius:20px; margin-left:4px; }
+    .rsvp-sub    { display:block; font-size:11px; color:#888; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .rsvp-arrow  { color:#ccc; font-size:22px; font-weight:300; flex-shrink:0; }
+    .empty       { color:#aaa; font-size:13px; text-align:center; padding:20px; display:block; }
+
+    /* ── Detail Modal ── */
+    #modal { position:fixed; inset:0; z-index:1000; display:none; align-items:center; justify-content:center; padding:20px; }
+    #modal.open { display:flex; }
+    .modal-backdrop { position:absolute; inset:0; background:rgba(0,0,0,.65); backdrop-filter:blur(4px); }
+    .modal-box {
+      position:relative; z-index:1;
+      background:linear-gradient(160deg,#fffdf7 0%,#fef3dc 100%);
+      border-radius:24px; width:100%; max-width:400px;
+      box-shadow:0 30px 80px rgba(0,0,0,.5); overflow:hidden;
+      animation:popIn .25s cubic-bezier(.175,.885,.32,1.275);
+    }
+    @keyframes popIn { from{opacity:0;transform:scale(.85)} to{opacity:1;transform:scale(1)} }
+    .modal-header { background:linear-gradient(135deg,#1a6b6e 0%,#0d4a4c 100%); padding:24px 24px 20px; position:relative; }
+    .modal-avatar { width:56px; height:56px; border-radius:50%; background:rgba(255,255,255,.2); color:white; font-weight:700; font-size:24px; display:flex; align-items:center; justify-content:center; margin-bottom:10px; border:2px solid rgba(255,255,255,.3); }
+    .modal-header h2 { font-family:'Playfair Display',serif; font-size:22px; color:white; }
+    .modal-close { position:absolute; top:16px; right:16px; background:rgba(255,255,255,.15); border:none; color:white; width:32px; height:32px; border-radius:50%; cursor:pointer; font-size:16px; display:flex; align-items:center; justify-content:center; transition:background .2s; }
+    .modal-close:hover { background:rgba(255,255,255,.28); }
+    .modal-body { padding:20px 24px 28px; }
+    .modal-row  { display:flex; align-items:flex-start; gap:12px; padding:10px 0; border-bottom:1px dashed rgba(0,0,0,.07); }
+    .modal-row:last-child { border-bottom:none; }
+    .modal-icon  { font-size:20px; flex-shrink:0; width:28px; text-align:center; }
+    .modal-label { font-size:10px; font-weight:600; letter-spacing:1.5px; text-transform:uppercase; color:var(--ocean); margin-bottom:2px; }
+    .modal-val   { font-size:14px; color:var(--text); font-weight:500; }
+
+    /* ── Birthday Success Popup ── */
+    #bdayPopup { position:fixed; inset:0; z-index:2000; display:none; align-items:center; justify-content:center; padding:20px; }
+    #bdayPopup.open { display:flex; }
+    .bday-backdrop { position:absolute; inset:0; background:rgba(0,0,0,.75); backdrop-filter:blur(6px); }
+    .bday-box {
+      position:relative; z-index:1;
+      background:linear-gradient(160deg,#1a6b6e 0%,#0d3d3f 100%);
+      border-radius:28px; width:100%; max-width:380px;
+      box-shadow:0 0 0 1.5px rgba(212,160,23,.5), 0 40px 100px rgba(0,0,0,.6);
+      overflow:hidden; text-align:center;
+      animation:bdayPop .4s cubic-bezier(.175,.885,.32,1.275);
+    }
+    @keyframes bdayPop {
+      0%  { opacity:0; transform:scale(.6) translateY(40px); }
+      70% { transform:scale(1.05) translateY(-4px); }
+      100%{ opacity:1; transform:scale(1) translateY(0); }
+    }
+    .bday-top-bar { height:6px; background:repeating-linear-gradient(90deg,var(--gold) 0,var(--gold) 20px,var(--coral) 20px,var(--coral) 40px); }
+    .bday-content { padding:36px 28px 32px; }
+    .bday-emoji { font-size:64px; display:block; margin-bottom:10px; animation:bdayBounce 1s ease-in-out infinite; }
+    @keyframes bdayBounce {
+      0%,100%{ transform:translateY(0) rotate(-5deg); }
+      50%    { transform:translateY(-12px) rotate(5deg); }
+    }
+    .bday-title {
+      font-family:'Playfair Display',serif; font-size:28px; font-weight:900;
+      color:white; line-height:1.2; margin-bottom:8px;
+      text-shadow:0 2px 12px rgba(0,0,0,.3);
+    }
+    .bday-title span { color:var(--gold); display:block; font-size:.7em; }
+    .bday-greeting {
+      font-size:15px; color:rgba(255,255,255,.8);
+      margin:14px 0 6px; font-weight:400; line-height:1.6;
+    }
+    .bday-name { color:var(--gold); font-weight:700; }
+    .bday-sub { font-size:12px; color:rgba(255,255,255,.5); margin-bottom:28px; letter-spacing:.5px; }
+    .bday-details {
+      display:flex; justify-content:center; gap:16px;
+      background:rgba(255,255,255,.08); border-radius:16px;
+      padding:14px 20px; margin-bottom:24px;
+    }
+    .bday-detail-item { text-align:center; }
+    .bday-detail-icon { font-size:20px; display:block; margin-bottom:3px; }
+    .bday-detail-label { font-size:10px; color:rgba(255,255,255,.5); letter-spacing:1px; text-transform:uppercase; display:block; }
+    .bday-detail-val { font-size:13px; color:white; font-weight:600; display:block; }
+    .btn-bday-close {
+      width:100%; padding:14px;
+      background:linear-gradient(135deg,var(--gold),var(--coral));
+      border:none; border-radius:14px;
+      font-family:'Poppins',sans-serif; font-size:14px; font-weight:700;
+      color:white; cursor:pointer; letter-spacing:1px;
+      text-transform:uppercase; box-shadow:0 6px 20px rgba(232,96,60,.4);
+      transition:transform .15s, box-shadow .15s;
+    }
+    .btn-bday-close:hover  { transform:translateY(-2px); box-shadow:0 10px 28px rgba(232,96,60,.5); }
+    .btn-bday-close:active { transform:translateY(0); }
+    .bday-stars { position:absolute; inset:0; pointer-events:none; overflow:hidden; border-radius:28px; }
+    .bday-star { position:absolute; background:white; border-radius:50%; animation:twinkle 2s infinite alternate; }
+
+    /* Confetti */
+    .confetti-piece { position:fixed; top:-20px; border-radius:2px; z-index:9999; animation:confettiFall linear forwards; pointer-events:none; }
+    @keyframes confettiFall { to{transform:translateY(110vh) rotate(720deg);opacity:0} }
+
+    /* Responsive: stack info grid to 2 cols on small screens */
+    @media (max-width: 420px) {
+      .info-grid { grid-template-columns:1fr 1fr; }
+      .info-card.time-card { grid-column:1/-1; }
+    }
+  </style>
+</head>
+<body>
+
+<div class="stars" id="stars"></div>
+
+<div class="wrapper">
+  <div class="card">
+
+    <!-- Header -->
+    <div class="header">
+      <div class="wave-deco"></div>
+      <div class="birthday-badge">🎂 You're Invited!</div>
+      <h1>Melvin's <span>Birthday</span></h1>
+      <div class="emojis">🎉🌴🏖️🎊</div>
+    </div>
+
+    <!-- Info Grid -->
+    <div class="info-grid">
+      <div class="info-card">
+        <div class="info-icon">📅</div>
+        <div class="info-label">When</div>
+        <div class="info-value"><strong>April 26–27</strong><br>Sunday – Monday</div>
+      </div>
+      <div class="info-card">
+        <div class="info-icon">📍</div>
+        <div class="info-label">Where</div>
+        <div class="info-value"><strong>Bakayan</strong><br>Beach Resort</div>
+      </div>
+      <div class="info-card time-card">
+        <div class="info-icon">⏰</div>
+        <div class="info-label">Arrive At</div>
+        <div class="info-value"><strong>2:00 PM</strong><br>April 26</div>
+      </div>
+    </div>
+
+    <!-- What to Bring -->
+    <div class="bring-section">
+      <div class="bring-title">What to Bring</div>
+      <div class="bring-item">
+        <div class="dot"></div>
+        <p><strong>₱50</strong> — Entrance fee at the resort</p>
+      </div>
+      <div class="bring-item">
+        <div class="dot"></div>
+        <p>Habol, Unlan para comfortable</p>
+      </div>
+    </div>
+
+    <!-- RSVP Form -->
+    <div class="form-section">
+      <div class="form-title">Count Me In!</div>
+
+      <div class="field">
+        <label>Your Full Name</label>
+        <div class="name-row">
+          <div>
+            <input
+              type="text" id="fullName"
+              placeholder="e.g. Juan"
+              maxlength="12"
+              oninput="onNameInput(this)"
+            />
+            <span class="char-counter" id="charCount">0 / 8 letters</span>
+          </div>
+          <button class="btn-plus1" id="plusOneBtn" onclick="toggleGF()">+1<br>GF</button>
+        </div>
+        <span class="name-hint">Letters only · Min 4, Max 8 letters · Tap +1 if bringing GF</span>
+      </div>
+
+      <div class="field">
+        <label>I'm also bringing...</label>
+        <div class="checkbox-group">
+          <label class="check-label"><input type="checkbox" id="duyan"/> Duyan</label>
+          <label class="check-label"><input type="checkbox" id="tent"/>  Tent</label>
+          <label class="check-label"><input type="checkbox" id="others" onchange="toggleOthers(this)"/> Others</label>
+        </div>
+        <input type="text" id="othersText" placeholder="e.g. speaker, food, drinks..."/>
+      </div>
+
+      <button class="btn-submit" onclick="submitRSVP()">I'm Coming!</button>
+      <div class="status" id="status"></div>
+    </div>
+
+    <!-- Who's Coming -->
+    <div class="rsvp-section">
+      <div class="rsvp-header">
+        <h3>Who's Coming</h3>
+        <div class="rsvp-badges">
+          <div class="rsvp-badge"><span id="rsvpCount">0</span> RSVPs</div>
+          <div class="rsvp-badge total-badge">👥 <span id="rsvpTotal">0</span> total</div>
+        </div>
+      </div>
+      <ul id="rsvpList">
+        <li class="empty">Loading...</li>
+      </ul>
+    </div>
+
+  </div>
+</div>
+
+<!-- Detail Modal -->
+<div id="modal" role="dialog" aria-modal="true" aria-labelledby="modalName">
+  <div class="modal-backdrop" onclick="closeModal()"></div>
+  <div class="modal-box">
+    <div class="modal-header">
+      <button class="modal-close" onclick="closeModal()">✕</button>
+      <div class="modal-avatar" id="modalInitial">?</div>
+      <h2 id="modalName">—</h2>
+    </div>
+    <div class="modal-body">
+      <div class="modal-row">
+        <div class="modal-icon">💑</div>
+        <div><div class="modal-label">Bringing GF?</div><div class="modal-val" id="modalGF">—</div></div>
+      </div>
+      <div class="modal-row">
+        <div class="modal-icon">🎒</div>
+        <div><div class="modal-label">Also Bringing</div><div class="modal-val" id="modalBring">—</div></div>
+      </div>
+      <div class="modal-row">
+        <div class="modal-icon">🕐</div>
+        <div><div class="modal-label">RSVP'd At</div><div class="modal-val" id="modalTime">—</div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ✨ Birthday Success Popup -->
+<div id="bdayPopup" role="dialog" aria-modal="true">
+  <div class="bday-backdrop" onclick="closeBdayPopup()"></div>
+  <div class="bday-box">
+    <div class="bday-stars" id="bdayStars"></div>
+    <div class="bday-top-bar"></div>
+    <div class="bday-content">
+      <span class="bday-emoji">🎉</span>
+      <div class="bday-title">
+        See you at my
+        <span>Birthday! 🎂</span>
+      </div>
+      <p class="bday-greeting">You're on the list, <span class="bday-name" id="bdayPopupName"></span></p>
+      <p class="bday-sub">We can't wait to celebrate with you</p>
+      <div class="bday-details">
+        <div class="bday-detail-item">
+          <span class="bday-detail-icon">📅</span>
+          <span class="bday-detail-label">Date</span>
+          <span class="bday-detail-val">Apr 26–27</span>
+        </div>
+        <div class="bday-detail-item">
+          <span class="bday-detail-icon">⏰</span>
+          <span class="bday-detail-label">Time</span>
+          <span class="bday-detail-val">2:00 PM</span>
+        </div>
+        <div class="bday-detail-item">
+          <span class="bday-detail-icon">📍</span>
+          <span class="bday-detail-label">Place</span>
+          <span class="bday-detail-val">Bakayan</span>
+        </div>
+        <div class="bday-detail-item">
+          <span class="bday-detail-icon">🌊</span>
+          <span class="bday-detail-label">Vibes</span>
+          <span class="bday-detail-val">Beach!</span>
+        </div>
+      </div>
+      <button class="btn-bday-close" onclick="closeBdayPopup()">Let's Go!</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  /* Stars */
+  const starsEl = document.getElementById("stars");
+  for (let i = 0; i < 80; i++) {
+    const s = document.createElement("div");
+    s.className = "star";
+    const sz = Math.random() * 2.5 + 0.5;
+    s.style.cssText = `width:${sz}px;height:${sz}px;left:${Math.random()*100}%;top:${Math.random()*100}%;animation-delay:${Math.random()*3}s;animation-duration:${2+Math.random()*3}s;`;
+    starsEl.appendChild(s);
+  }
+
+  /* Mini stars inside bday popup */
+  const bdayStarsEl = document.getElementById("bdayStars");
+  for (let i = 0; i < 20; i++) {
+    const s = document.createElement("div");
+    s.className = "bday-star";
+    const sz = Math.random() * 2 + 1;
+    s.style.cssText = `width:${sz}px;height:${sz}px;left:${Math.random()*100}%;top:${Math.random()*100}%;animation-delay:${Math.random()*2}s;animation-duration:${1.5+Math.random()*2}s;opacity:0.4;`;
+    bdayStarsEl.appendChild(s);
+  }
+
+  /* GF Toggle */
+  window._hasGF = false;
+  function toggleGF() {
+    window._hasGF = !window._hasGF;
+    const btn = document.getElementById("plusOneBtn");
+    btn.classList.toggle("active", window._hasGF);
+    btn.innerHTML = window._hasGF ? "✓<br>+1 GF" : "+1<br>GF";
+  }
+  function setGF(v) {
+    window._hasGF = v;
+    const btn = document.getElementById("plusOneBtn");
+    btn.classList.toggle("active", v);
+    btn.innerHTML = v ? "✓<br>+1 GF" : "+1<br>GF";
+  }
+
+  /* Name input — strip emojis/stickers, letters only, max 8 */
+  function stripEmojisAndSymbols(str) {
+    return str.replace(/[^A-Za-z\s]/g, "");
+  }
+
+  function onNameInput(input) {
+    input.value = stripEmojisAndSymbols(input.value);
+
+    let letters = 0, result = "";
+    for (const ch of input.value) {
+      if (/\s/.test(ch)) { result += ch; }
+      else if (letters < 8) { result += ch; letters++; }
+    }
+    input.value = result;
+
+    letters = input.value.replace(/\s/g,"").length;
+    const counter = document.getElementById("charCount");
+    counter.textContent = `${letters} / 8 letters`;
+
+    if (letters === 0) {
+      counter.className = "char-counter";
+    } else if (letters < 4) {
+      counter.className = "char-counter tooShort";
+    } else if (letters >= 7) {
+      counter.className = "char-counter warn";
+    } else {
+      counter.className = "char-counter";
+    }
+  }
+
+  /* Others toggle */
+  function toggleOthers(cb) {
+    const txt = document.getElementById("othersText");
+    txt.style.display = cb.checked ? "block" : "none";
+    if (!cb.checked) txt.value = "";
+  }
+
+  /* Modal / Popup close on Escape */
+  document.addEventListener("keydown", e => {
+    if (e.key === "Escape") { closeModal(); closeBdayPopup(); }
+  });
+
+  /* Confetti */
+  function launchConfetti() {
+    const colors = ["#d4a017","#e8603c","#1a6b6e","#f5e6c8","#ffffff"];
+    for (let i = 0; i < 90; i++) {
+      setTimeout(() => {
+        const c = document.createElement("div");
+        c.className = "confetti-piece";
+        c.style.cssText = `left:${Math.random()*100}vw;background:${colors[~~(Math.random()*colors.length)]};animation-duration:${1.5+Math.random()*2}s;width:${6+Math.random()*10}px;height:${6+Math.random()*10}px;border-radius:${Math.random()>.5?"50%":"2px"};`;
+        document.body.appendChild(c);
+        setTimeout(() => c.remove(), 4000);
+      }, i * 30);
+    }
+  }
+</script>
+</body>
+</html>
